@@ -189,7 +189,11 @@
   .tag{ color:var(--accent); letter-spacing:.06em; }
   .tag.min{ color:var(--min); }
   tbody tr.active td.idx, tbody tr:hover td.idx{ color:var(--accent); }
-  @media (max-width:760px){ .table-scroll{ overflow:visible; } }
+  @media (max-width:760px){
+    .table-card{ display:block; }
+    .table-scroll{ overflow:visible; flex:none; min-height:0; }
+    thead th{ position:static; }
+  }
 
   footer{
     margin-top:30px; padding-top:16px; border-top:1px solid var(--line);
