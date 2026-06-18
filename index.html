@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Focus Step Estimator</title>
+<style>
+  /* ── Dark theme (default) — reference palette ── */
+  :root{
+    color-scheme: dark;
+    --bg:        #0a0c10;
+    --panel:     #0f1318;
+    --field:     #161b22;
+    --line:      rgba(230,237,243,.09);
+    --line-2:    rgba(230,237,243,.16);
+    --rule:      rgba(230,237,243,.24);
+    --ink:       #e6edf3;
+    --ink-dim:   #97a2af;
+    --steel:     #5a6573;
+    --accent:    #4d9eff;          /* blue display / active */
+    --accent-soft: rgba(77,158,255,.14);
+    --glow:      rgba(77,158,255,.55);
+    --green:     #22c55e;          /* interactive controls  */
+    --green-soft:rgba(34,197,94,.16);
+    --min:       #e6edf3;
+    --inf:       #4d9eff;
+
+    --sans: "Helvetica Neue", Helvetica, Arial, "Segoe UI", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  /* ── Light theme ── */
+  :root[data-theme="light"]{
+    color-scheme: light;
+    --bg:        #f7f9fc;
+    --panel:     #ffffff;
+    --field:     #eef1f6;
+    --line:      rgba(13,17,22,.09);
+    --line-2:    rgba(13,17,22,.16);
+    --rule:      rgba(13,17,22,.78);
+    --ink:       #0e1116;
+    --ink-dim:   #4a5564;
+    --steel:     #97a2b0;
+    --accent:    #2563eb;
+    --accent-soft: rgba(37,99,235,.08);
+    --glow:      rgba(37,99,235,.28);
+    --green:     #16a34a;
+    --green-soft:rgba(22,163,74,.12);
+    --min:       #0e1116;
+    --inf:       #2563eb;
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; }
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--sans);
+    -webkit-font-smoothing:antialiased; min-height:100dvh; line-height:1.4;
+    transition:background .25s, color .25s;
+  }
+  :root[data-theme="dark"] body{
+    background:radial-gradient(120% 80% at 50% -18%, #10161e 0%, #0a0c10 58%) fixed, #0a0c10;
+  }
+
+  .wrap{ max-width:1080px; margin:0 auto; padding:clamp(16px,3vw,34px); }
+
+  /* ── Header ── */
+  header{
+    display:flex; align-items:flex-end; justify-content:space-between;
+    gap:16px; flex-wrap:wrap; padding-bottom:16px; border-bottom:1.5px solid var(--rule);
+  }
+  .logo{ height:26px; width:auto; display:block; margin-bottom:13px; }
+  :root[data-theme="light"] .logo{ filter:invert(1); }
+  .brand h1{ margin:0; font-size:clamp(21px,3.4vw,30px); font-weight:600; letter-spacing:.01em; }
+  .brand h1 b{ color:var(--accent); font-weight:600; }
+
+  .controls{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+
+  /* theme tumbler */
+  .theme-switch{ appearance:none; border:0; background:transparent; cursor:pointer; padding:0; border-radius:999px; }
+  .theme-switch:focus-visible{ outline:2px solid var(--accent); outline-offset:3px; }
+  .ts-track{
+    position:relative; display:flex; align-items:center; justify-content:space-between;
+    width:62px; height:30px; padding:0 8px; border-radius:999px;
+    border:1px solid var(--line-2); background:var(--field);
+    transition:background .25s, border-color .25s;
+  }
+  .ts-ico{ font-size:13px; line-height:1; color:var(--steel); transition:color .25s; z-index:1; }
+  :root[data-theme="dark"] .ts-moon{ color:var(--ink); }
+  :root[data-theme="light"] .ts-sun{ color:var(--ink); }
+  .ts-knob{
+    position:absolute; top:50%; left:3px; width:24px; height:24px; transform:translateY(-50%);
+    border-radius:50%; background:var(--ink);
+    transition:left .22s cubic-bezier(.4,.1,.2,1), background .25s;
+  }
+  :root[data-theme="dark"] .ts-knob{ left:35px; }
+
+  /* unit toggle */
+  .seg{ display:inline-flex; border:1px solid var(--line-2); border-radius:999px; padding:3px; gap:2px; background:var(--field); }
+  .seg button{
+    appearance:none; border:0; background:transparent; cursor:pointer; color:var(--ink-dim);
+    font-family:var(--mono); font-size:13px; padding:6px 14px; border-radius:999px;
+    letter-spacing:.06em; transition:background .18s, color .18s;
+  }
+  .seg button[aria-pressed="true"]{ background:var(--accent); color:var(--bg); font-weight:600; }
+  .seg button:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+
+  /* ── Main grid ──  left column: inputs + dial · right column: table  */
+  main{
+    display:grid; gap:clamp(18px,2.6vw,32px); margin-top:26px;
+    grid-template-columns:minmax(0,0.92fr) minmax(0,1.08fr);
+    grid-template-areas:"inputs table" "dial table";
+    align-items:start;
+  }
+  .inputs-card{ grid-area:inputs; }
+  .dial-card{ grid-area:dial; }
+  .table-card{ grid-area:table; align-self:stretch; min-height:0; display:flex; flex-direction:column; }
+  @media (max-width:760px){
+    main{ grid-template-columns:1fr; grid-template-areas:"inputs" "dial" "table"; }
+  }
+
+  .panel-label{
+    font-size:11px; letter-spacing:.26em; text-transform:uppercase; color:var(--steel);
+    margin:0 0 14px; display:flex; align-items:center; gap:10px;
+  }
+  .panel-label::after{ content:""; flex:1; height:1px; background:var(--line); }
+
+  /* ── Inputs ── */
+  .field-row{ margin-bottom:18px; }
+  .field-row > label{ display:block; font-size:13px; color:var(--ink-dim); margin-bottom:7px; letter-spacing:.02em; }
+  .field-row .hint{ color:var(--steel); }
+  .num{
+    display:flex; align-items:baseline; gap:8px; background:var(--field);
+    border:1px solid var(--line-2); border-radius:10px; padding:12px 14px;
+    transition:border-color .18s, background .25s;
+  }
+  .num:focus-within{ border-color:var(--accent); }
+  .num input{
+    flex:1; width:100%; background:transparent; border:0; color:var(--ink);
+    font-family:var(--mono); font-size:22px; letter-spacing:.01em; outline:none; -moz-appearance:textfield;
+  }
+  .num input::-webkit-outer-spin-button, .num input::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
+  .num .unit{ font-family:var(--mono); font-size:14px; color:var(--accent); min-width:20px; }
+
+  .steps-head{ display:flex; align-items:baseline; justify-content:space-between; }
+  .steps-val{ font-family:var(--mono); font-size:22px; color:var(--ink); }
+  input[type=range]{ width:100%; height:30px; margin-top:6px; cursor:pointer; accent-color:var(--green); }
+  input[type=range]:focus-visible{ outline:2px solid var(--green); outline-offset:4px; border-radius:4px; }
+  .ticks-mini{ display:flex; justify-content:space-between; font-family:var(--mono); font-size:11px; color:var(--steel); margin-top:-2px; }
+
+  /* ── Dial ── */
+  .dial-card{ position:relative; }
+  .dial-wrap{
+    position:relative; background:var(--field); border:1px solid var(--line-2);
+    border-radius:16px; padding:6px 6px 0; overflow:hidden; transition:background .25s, border-color .25s;
+  }
+  svg.dial{ display:block; width:100%; height:auto; }
+  .readout{ position:absolute; left:0; right:0; top:47%; transform:translateY(-50%); text-align:center; pointer-events:none; padding:0 12px; }
+  .readout .r-step{ font-size:11px; letter-spacing:.3em; text-transform:uppercase; color:var(--steel); }
+  .readout .r-dist{
+    font-family:var(--mono); font-size:clamp(30px,5.5vw,44px); color:var(--accent);
+    line-height:1; margin:5px 0 2px; text-shadow:0 0 22px var(--glow); word-break:break-word;
+  }
+  .readout .r-unit{ font-family:var(--mono); font-size:14px; color:var(--accent); text-shadow:none; }
+  .readout .r-pct{ font-family:var(--mono); font-size:12px; color:var(--ink-dim); margin-top:7px; }
+
+  .tick{ stroke:var(--ink-dim); stroke-width:1.4; transition:stroke .15s; }
+  .tick.is-min{ stroke:var(--min); }
+  .tick.is-inf{ stroke:var(--inf); }
+  .tick.active{ stroke:var(--accent); stroke-width:2.6; filter:drop-shadow(0 0 4px var(--glow)); }
+  .tick-label{ font-family:var(--mono); font-size:10px; fill:var(--ink-dim); transition:fill .15s; }
+  .tick-label.active{ fill:var(--accent); }
+  .tick-label.is-edge{ fill:var(--ink); }
+  .arc-base{ fill:none; stroke:var(--line-2); stroke-width:1.5; }
+
+  /* ── Table ── */
+  .table-scroll{ flex:1 1 0; min-height:0; overflow:auto; border-radius:4px; }
+  table{ width:100%; border-collapse:collapse; font-family:var(--mono); }
+  thead th{
+    text-align:left; font-family:var(--sans); font-weight:600; font-size:11px; letter-spacing:.16em;
+    text-transform:uppercase; color:var(--steel); padding:2px 12px 12px; border-bottom:1.5px solid var(--rule);
+    position:sticky; top:0; background:var(--bg); z-index:2;
+  }
+  :root[data-theme="dark"] thead th{ background:#0c1117; }
+  thead th.num-col, tbody td.num-col{ text-align:right; }
+  tbody td{ padding:11px 12px; border-bottom:1px solid var(--line); font-size:15px; }
+  tbody tr{ transition:background .12s; cursor:default; }
+  tbody tr:hover, tbody tr.active{ background:var(--accent-soft); }
+  td.idx{ color:var(--steel); width:48px; }
+  td.dist{ color:var(--ink); }
+  .tag{ color:var(--accent); letter-spacing:.06em; }
+  .tag.min{ color:var(--min); }
+  tbody tr.active td.idx, tbody tr:hover td.idx{ color:var(--accent); }
+  @media (max-width:760px){ .table-scroll{ overflow:visible; } }
+
+  footer{
+    margin-top:30px; padding-top:16px; border-top:1px solid var(--line);
+    display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;
+    font-size:11px; letter-spacing:.04em; color:var(--steel);
+  }
+  footer .mono{ font-family:var(--mono); }
+  .research{ color:var(--accent); text-decoration:none; border-bottom:1px solid transparent; transition:border-color .15s; }
+  .research:hover{ border-bottom-color:var(--accent); }
+
+  /* ── Mobile ── */
+  @media (max-width:520px){
+    .wrap{ padding:16px 14px 28px; }
+    header{ align-items:flex-start; }
+    .logo{ height:22px; margin-bottom:10px; }
+    .controls{ width:100%; justify-content:space-between; }
+    .num input{ font-size:20px; }
+    thead th{ font-size:10px; letter-spacing:.1em; padding:0 8px 10px; }
+    tbody td{ padding:10px 8px; font-size:14px; }
+    td.idx{ width:38px; }
+    .seg button{ padding:6px 11px; font-size:12px; }
+  }
+  @media (prefers-reduced-motion:reduce){ *{ transition:none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <img class="logo" src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjwhRE9DVFlQRSBzdmcgUFVCTElDICItLy9XM0MvL0RURCBTVkcgMS4xLy9FTiIgImh0dHA6Ly93d3cudzMub3JnL0dyYXBoaWNzL1NWRy8xLjEvRFREL3N2ZzExLmR0ZCI+DQo8IS0tIENyZWF0b3I6IENvcmVsRFJBVyAtLT4NCjxzdmcgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWw6c3BhY2U9InByZXNlcnZlIiB3aWR0aD0iMTA0LjEwMm1tIiBoZWlnaHQ9IjM1LjI3NzhtbSIgdmVyc2lvbj0iMS4xIiBzdHlsZT0ic2hhcGUtcmVuZGVyaW5nOmdlb21ldHJpY1ByZWNpc2lvbjsgdGV4dC1yZW5kZXJpbmc6Z2VvbWV0cmljUHJlY2lzaW9uOyBpbWFnZS1yZW5kZXJpbmc6b3B0aW1pemVRdWFsaXR5OyBmaWxsLXJ1bGU6ZXZlbm9kZDsgY2xpcC1ydWxlOmV2ZW5vZGQiDQp2aWV3Qm94PSIwIDAgMjUyOTIuNTcgODU3MS4wNCINCiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayINCiB4bWxuczp4b2RtPSJodHRwOi8vd3d3LmNvcmVsLmNvbS9jb3JlbGRyYXcvb2RtLzIwMDMiPg0KIDxkZWZzPg0KICA8c3R5bGUgdHlwZT0idGV4dC9jc3MiPg0KICAgPCFbQ0RBVEFbDQogICAgLmZpbDAge2ZpbGw6I0ZFRkVGRX0NCiAgICAuZmlsMSB7ZmlsbDojRkVGRUZFO2ZpbGwtcnVsZTpub256ZXJvfQ0KICAgXV0+DQogIDwvc3R5bGU+DQogPC9kZWZzPg0KIDxnIGlkPSLQodC70L7QuV94MDAyMF8xIj4NCiAgPG1ldGFkYXRhIGlkPSJDb3JlbENvcnBJRF8wQ29yZWwtTGF5ZXIiLz4NCiAgPGcgaWQ9Il8xODM0MTEzNDUyMzY4Ij4NCiAgIDxwYXRoIGNsYXNzPSJmaWwwIiBkPSJNMTQ0NjMuODYgMTY0My4yN2wwIDIyNjkuMjMgLTU1My43IDAgMCAtMjI2OS4yMyAtNDE5LjY2IDAgMCAtNDAwLjQ3IDEzOTMuMDMgMCAwIDQwMC40NyAtNDE5LjY2IDB6bTM5MzkuNzQgMzAxNS4yMWwtNTA0LjMzIDAgMCAyNjY5Ljc1IDUwNC4zMyAwIDAgLTEyODcuNzggNjYuNzQgMGMwLDAgNDA5LjUxLDEyODcuNzggNDA5LjUxLDEyODcuNzhsNDY1LjM5IDAgMCAtMjY2OS43NSAtNTA3LjgzIDAgMCAxMTU0LjI1IC02Ni43NyAwIC0zNjcuMDQgLTExNTQuMjV6bS04NzI1LjE4IDBjMjY2LjExLDAgNTE2Ljc1LDAgNzgyLjg2LDBsMjI3Ljg3IDEyMDEuMzggNjYuNzQgMCAyMzAuMDYgLTEyMDEuMzhjMjY2LjExLDAgNTM4Ljg2LDAgODA0Ljk1LDBsMCAyNjY5LjcgLTU1My42OCAwIDAgLTE2MDEuOCAtNjYuNzQgMGMtMTAxLjI5LDUxMS43IC0yMDIuNTgsMTA5MC4xMyAtMzAzLjgyLDE2MDEuODVsLTI2My45NyAtMC4wMiAtMzAzLjg0IC0xNjAxLjgzIC02Ni43NCAwIDAgMTYwMS44IC01NTMuNjggMCAwIC0yNjY5Ljd6bTIzMDQuNjggMjY2OS43NWw1NTcuMjMgMCA0My45IC02ODQuMTIgMjY4Ljk2IDAgNDMuMzQgNjg0LjEyIDU3MS4zNCAwIC0yMDMuNzUgLTI2NjkuNzdjMCwwIC0xMDU5LjAzLDAuMDIgLTEwNTkuMDMsMC4wMmwtMjIxLjk5IDI2NjkuNzV6bTYyNi44NiAtMTA4NC41OWw3Ni4wNSAtMTE4NC43MSA2Ni43NCAwIDc1LjA3IDExODQuNzEgLTIxNy44NiAwem03MDA2LjYzIC0xNTg1LjE2YzM5Mi42NSwwIDc4NS4yNywwIDExNzcuOTEsMGwwIDQwMC40NCAtNjI0LjIzIDAgMCA3MzQuMTcgNDgwLjE4IDAgMCA0MDAuNDcgLTQ4MC4xOCAwIDAgNzM0LjE3IDYyNC4yMyAwIDAgNDAwLjQ3Yy0zOTIuNjUsMCAtNzg1LjI5LC0wLjAyIC0xMTc3LjkxLC0wLjAybDAgLTI2NjkuN3ptLTQzMDkuMDkgMGw1NjcuODIgMCAwIDExMzQuNTkgMzQ1LjYxIDAgMCAtMTEzNC41OSA1NjcuNzkgMCAwIDI2NjkuNyAtNTY3Ljc5IDAgMCAtMTEzNC42MiAtMzQ1LjYxIDAgMCAxMTM0LjYyIC01NjcuODIgMCAwIC0yNjY5Ljd6bS0yMzcuNDQgMTEzNC41OWwwIC02MDAuNjdjMCwtMzMzLjcgLTY2Ljc5LC01MzMuOTMgLTMzMy43MywtNTMzLjkzbC03NTMuODUgMGMtMjY2Ljk2LDAgLTMzMy43LDIwMC4yMiAtMzMzLjcsNTMzLjkzbDAgMTYwMS44NWMwLDMzMy43IDY2Ljc0LDUzMy45MyAzMzMuNyw1MzMuOTNsNzUzLjg1IDBjMjY2Ljk2LDAgMzMzLjczLC0yMDAuMjIgMzMzLjczLC01MzMuOTNsMCAtNjAwLjY5IC01NTMuNyAwIDAgNzM0LjE3IC0zMTMuODggMCAwIC0xODY4LjgxIDMxMy44OCAwIDAgNzM0LjE1IDU1My43IDB6bS0zMDg2Ljk2IC0xODgwLjVsNTU3LjIzIDAgNDMuOSAtNjg0LjEyIDI2OC45NiAwIDQzLjM0IDY4NC4xIDU3MS4zNCAwIC0yMDMuNzUgLTI2NjkuNzVjMCwwIC0xMDU5LjAzLDAgLTEwNTkuMDMsMGwtMjIxLjk5IDI2NjkuNzd6bTYyNi44NiAtMTA4NC42Mmw3Ni4wNSAtMTE4NC42OSA2Ni43NCAwIDc1LjA3IDExODQuNjkgLTIxNy44NiAwem0tMjkzMS41NCAtMTU4NS4xNmMyNjYuMTEsMCA1MTYuNzUsMCA3ODIuODYsMGwyMjcuODcgMTIwMS4zOCA2Ni43NCAwIDIzMC4wNiAtMTIwMS4zOGMyNjYuMTEsMCA1MzguODYsMCA4MDQuOTUsMGwwIDI2NjkuNzMgLTU1My42OCAwIDAgLTE2MDEuODMgLTY2Ljc0IDBjLTEwMS4yOSw1MTEuNzIgLTIwMi41OCwxMDkwLjEzIC0zMDMuODIsMTYwMS44NWwtMjYzLjk3IDAgLTMwMy44NCAtMTYwMS44NSAtNjYuNzQgMCAwIDE2MDEuODMgLTU1My42OCAwIDAgLTI2NjkuNzN6bTczODEuNjYgMzQxNS42OGw1NjcuODIgMCAwIDI2NjkuNyAtNTY3LjgyIDAgMCAtMjY2OS43em0xMzkzLjA1IC0zNDE1LjY4YzI2Ni4wOSwwIDUxNi43NSwwIDc4Mi44NCwwbDIyNy44NyAxMjAxLjM4IDY2Ljc0IDAgMjMwLjA4IC0xMjAxLjM4YzI2Ni4xMSwwIDUzOC44MywwIDgwNC45NSwwbDAgMjY2OS43IC01NTMuNjggMCAwIC0xNjAxLjggLTY2Ljc3IDBjLTEwMS4yNyw1MTEuNyAtMjAyLjU1LDEwOTAuMTMgLTMwMy44MiwxNjAxLjg1bC0yNjMuOTUgLTAuMDIgLTMwMy44NCAtMTYwMS44MyAtNjYuNzQgMCAwIDE2MDEuOCAtNTUzLjY4IDAgMCAtMjY2OS43em01NjYxLjUyIDBjMzkyLjY1LDAgNzg1LjI3LDAgMTE3Ny45NCwwbDAgNDAwLjQ3IC02MjQuMjMgMCAwIDczNC4xNSA0ODAuMTYgMCAwIDQwMC40NyAtNDgwLjE2IDAgMCA3MzQuMiA2MjQuMjMgMCAwIDQwMC40NGMtMzkyLjY3LDAgLTc4NS4zMSwtMC4wMiAtMTE3Ny45NCwtMC4wMmwwIC0yNjY5Ljd6bS0xOTIuMjMgMGwtNTg4Ljk2IDAgLTExMy45MiAyMjY5LjI2IC02Ni43NCAwIC0xMTUuNTggLTIyNjkuMjYgLTU5OS41MiAwIDIwMy43NSAyNjY5LjdjMzU3LjAzLDAgNzAxLjk2LDAuMDIgMTA1OS4wMSwwLjAybDIyMS45NyAtMjY2OS43M3ptLTE5OTkuMzUgMGwtNzc0Ljk5IDBjLTI2Ni45NiwwIC0zMzMuNywyMDAuMjUgLTMzMy43LDUzMy45NWwwIDE2MDEuODNjMCwzMzMuNyA2Ni43NCw1MzMuOTUgMzMzLjcsNTMzLjk1bDc3NC45OSAwYzI2Ni45NiwwIDMzMy43MywtMjAwLjI1IDMzMy43MywtNTMzLjk1bDAgLTE2MDEuODNjMCwtMzMzLjczIC02Ni43NywtNTMzLjk1IC0zMzMuNzMsLTUzMy45NXptLTIxOS45NyAyMjY5LjI2bC0zMzUuMDQgMCAwIC0xODY4Ljc5IDMzNS4wNCAwIDAgMTg2OC43OXptLTUwMDIuNTQgLTIyNjkuMjZsNTY3LjgyIDAgMCAxMTM0LjU5IDM0NS41OCAwIDAgLTExMzQuNTkgNTY3Ljc5IDAgMCAyNjY5LjcgLTU2Ny43OSAwIDAgLTExMzQuNjIgLTM0NS41OCAwIDAgMTEzNC42MiAtNTY3LjgyIDAgMCAtMjY2OS43em0tMjM3LjQ3IDExMzQuNTlsMCAtNjAwLjY0YzAsLTMzMy43IC02Ni43OSwtNTMzLjk1IC0zMzMuNzMsLTUzMy45NWwtNzUzLjgzIDBjLTI2Ni45NiwwIC0zMzMuNywyMDAuMjUgLTMzMy43LDUzMy45NWwwIDE2MDEuODNjMCwzMzMuNyA2Ni43NCw1MzMuOTUgMzMzLjcsNTMzLjk1bDc1My44MyAwYzI2Ni45OSwwIDMzMy43MywtMjAwLjI1IDMzMy43MywtNTMzLjk1bDAgLTYwMC42OSAtNTUzLjY4IDAgMCA3MzQuMTcgLTMxMy45IDAgMCAtMTg2OC43OSAzMTMuOSAwIDAgNzM0LjEyIDU1My42OCAweiIvPg0KICAgPGc+DQogICAgPHBhdGggY2xhc3M9ImZpbDEiIGQ9Ik04MDk5LjYzIDBsLTc2MjguMjIgMGMtMjYwLjExLDAgLTQ3MS4zOSwyMTEuMjggLTQ3MS4zOSw0NzEuNDFsMCA3NjI4LjIyYzAsMjYwLjU1IDIxMS4yOCw0NzEuNDEgNDcxLjM5LDQ3MS40MWw3NjI4LjIyIDBjMjYwLjE0LDAgNDcxLjQxLC0yMTAuODYgNDcxLjQxLC00NzEuNDFsMCAtNzYyOC4yMmMwLC0yNjAuMTQgLTIxMC44NCwtNDcxLjQxIC00NzEuNDEsLTQ3MS40MXptLTIzOTEuMyA3NDA1LjZsMCAwIC0xMjA0LjEgLTY5NS4yIDMxNTYuOTYgLTE4MjIuN2MtMTI0Ljk1LDcwNS4zNiAtNDY1LjQ4LDEzMzYuMjcgLTk1MS4zNSwxODIyLjE0IC0yODcuODEsMjg3LjgxIC02MjYuNTcsNTI0LjUyIC0xMDAxLjUsNjk1Ljc2em0tMjg0NS42NSAtNjIzOS45NWwwIDAgMTIwNC4xMyA2OTUuMiAtMzE1Ni45NiAxODIyLjkyYzEyNC45OCwtNzA1LjUzIDQ2NS43MywtMTMzNi41OSA5NTEuMzUsLTE4MjIuNTUgMjg3LjgxLC0yODcuNjEgNjI2LjU3LC01MjQuMyAxMDAxLjQ4LC02OTUuNTd6bTQ4MzUuNTMgMzQ0OC4xN2wwIDAgLTEyMDMuNSA2OTQuODYgMCAtMzY0NC42N2M3NC40Miw2Mi43NiAxNDYuMzEsMTI4LjQzIDIxNS4xMiwxOTcuMjEgNjIwLjU0LDYyMC41NCAxMDA0LjEsMTQ3Ny42NSAxMDA0LjEsMjQyNC4zMSAwLDExMC43NCAtNS40NCwyMjAuMjIgLTE1LjcyLDMyOC4yOXptLTE0NjQuOTIgNzk2LjIybDAgMCAtMzg5NS41MiAwIDE5NDcuNzUgLTMzNzMuNTUgMTk0Ny43NyAzMzczLjU1em0tNTM2MC40NCAtMTQ1Mi44MmwwIDAgMTIwMy41IC02OTQuNzkgMCAzNjQ0Ljc0Yy03NC40NCwtNjIuOCAtMTQ2LjMxLC0xMjguNSAtMjE1LjE0LC0xOTcuMzMgLTYyMC4xLC02MjAuNTQgLTEwMDQuMSwtMTQ3Ny42NSAtMTAwNC4xLC0yNDI0LjMxIDAsLTExMC43NiA1LjQ3LC0yMjAuMjQgMTUuNzQsLTMyOC4zMXptNTQwMy4zIC0xMDczLjMybDAgMCAtMzE1Ny4zNyAtMTgyMi45MmMzNjQuMjIsLTEzMS44MyA3NTcuMDYsLTIwMy44NyAxMTY2Ljc0LC0yMDMuODcgNzQyLjI0LDAgMTQyOS4zNSwyMzYuMTEgMTk5MC42Myw2MzYuOTRsMCAxMzg5Ljg0em0tMzk4MS4yNCAyODAzLjQ1bDAgMCAzMTU3LjI3IDE4MjIuODljLTM2NC4xOSwxMzEuNzYgLTc1Ny4wMSwyMDMuNyAtMTE2Ni42NiwyMDMuNyAtNzQyLjIxLDAgLTE0MjkuMzUsLTIzNS44NCAtMTk5MC42MSwtNjM2Ljc3bDAgLTEzODkuODJ6bS0yMTQuMjkgLTQ2ODYuNjdsMCAwIC0xMDc5Ljk1IDEwNzkuOTUgLTQxOS45OCAtMTQ5OS45MyAxNDk5LjkzIDQxOS45OHptLTMyMy41NSA2NTg0LjY5bDAgMCAtNTE0LjI3IDAgMCA1MTQuMjcgLTI1Ny4xMiAwIDAgLTUxNC4yNyAtNTE0LjI3IDAgMCAtMjU3LjEyIDUxNC4yNyAwIDAgLTUxNC4yNyAyNTcuMTIgMCAwIDUxNC4yNyA1MTQuMjcgMCAwIDI1Ny4xMnptNDczMy43OCAtMTQuNTVsMCAwIDEwNzkuOTUgLTEwNzkuOTUgNDE5Ljk4IDE0OTkuOTMgLTE0OTkuOTMgLTQxOS45OHptMTYwOC43NyAtNjMyOGwwIDAgLTUxNC4yNSAwIDAgNTE0LjI1IC0yNTcuMTUgMCAwIC01MTQuMjUgLTUxNC4yNSAwIDAgLTI1Ny4xNSA1MTQuMjUgMCAwIC01MTQuMjUgMjU3LjE1IDAgMCA1MTQuMjUgNTE0LjI1IDAgMCAyNTcuMTV6Ii8+DQogICAgPHBvbHlnb24gY2xhc3M9ImZpbDEiIHBvaW50cz0iNDE3Ni4yNCw0Mzk0LjggNDE3Ni4yNCw0OTI4LjM0IDQzOTQuOCw0OTI4LjM0IDQzOTQuOCw0Mzk0LjggNDkyOC4zNyw0Mzk0LjggNDkyOC4zNyw0MTc2LjI0IDQzOTQuOCw0MTc2LjI0IDQzOTQuOCwzNjQyLjcgNDE3Ni4yNCwzNjQyLjcgNDE3Ni4yNCw0MTc2LjI0IDM2NDIuNyw0MTc2LjI0IDM2NDIuNyw0Mzk0LjggIi8+DQogICA8L2c+DQogIDwvZz4NCiA8L2c+DQo8L3N2Zz4NCg==" alt="logo">
+      <h1>Focus Step <b>Estimator</b></h1>
+    </div>
+    <div class="controls">
+      <button class="theme-switch" id="themeSwitch" role="switch" aria-checked="true" aria-label="Light theme">
+        <span class="ts-track">
+          <span class="ts-ico ts-sun" aria-hidden="true">&#9728;</span>
+          <span class="ts-ico ts-moon" aria-hidden="true">&#9790;</span>
+          <span class="ts-knob"></span>
+        </span>
+      </button>
+      <div class="seg" role="group" aria-label="Distance units">
+        <button id="u-m"  aria-pressed="true">Meters</button>
+        <button id="u-ft" aria-pressed="false">Feet</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="inputs-card">
+      <p class="panel-label">Lens parameters</p>
+
+      <div class="field-row">
+        <label for="minMark">Min focus mark <span class="hint">(near limit)</span></label>
+        <div class="num">
+          <input id="minMark" type="number" inputmode="decimal" step="0.01" min="0" value="0.45">
+          <span class="unit" data-unit>m</span>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <label for="maxMark">Max mark before &#8734; <span class="hint">(far limit)</span></label>
+        <div class="num">
+          <input id="maxMark" type="number" inputmode="decimal" step="0.5" min="0" value="25">
+          <span class="unit" data-unit>m</span>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="steps-head">
+          <label for="steps" style="margin:0">Number of steps <span class="hint">(1&#8211;20)</span></label>
+          <span class="steps-val" id="stepsVal">20</span>
+        </div>
+        <input id="steps" type="range" min="1" max="20" step="1" value="20">
+        <div class="ticks-mini"><span>1</span><span>10</span><span>20</span></div>
+      </div>
+    </section>
+
+    <section class="dial-card">
+      <p class="panel-label">Barrel scale &#183; log</p>
+      <div class="dial-wrap">
+        <svg class="dial" viewBox="0 0 440 360" id="dial" aria-hidden="true"></svg>
+        <div class="readout" id="readout">
+          <div class="r-step" id="rStep">step 01</div>
+          <div class="r-dist" id="rDist">&#8212;</div>
+          <div class="r-pct"  id="rPct"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="table-card">
+      <p class="panel-label">Step table</p>
+      <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th class="idx">#</th>
+            <th>Mark</th>
+            <th class="num-col">Travel %</th>
+            <th class="num-col">Distance</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>Data based on our research &#183; <a class="research" href="https://docs.google.com/spreadsheets/d/1_TLURMh5E6j7Wq_9k1qokEIoEaCSjZHvRKS98TloS1s/edit?gid=153236938#gid=153236938" target="_blank" rel="noopener">open the spreadsheet &#8599;</a></span>
+    <span class="mono">Lens focus step estimator &#183; v1.0</span>
+  </footer>
+</div>
+
+<script>
+(() => {
+  const CURVE = [0.0008256881049,0.002171712631,0.003842455916,0.005760286066,
+    0.008103662495,0.01110092788,0.01492031495,0.02017046683,0.02694534565,
+    0.03569103191,0.04805172328,0.06617738235,0.09400483727,0.1374380069,
+    0.2138999471,0.3402345236,0.6160793542,1.040707754];
+  const FT = 3.280839895; // 1 metre in feet
+
+  const $ = id => document.getElementById(id);
+  const els = {
+    min:$('minMark'), max:$('maxMark'), steps:$('steps'), stepsVal:$('stepsVal'),
+    rows:$('rows'), dial:$('dial'), rStep:$('rStep'), rDist:$('rDist'), rPct:$('rPct'),
+    uM:$('u-m'), uFt:$('u-ft'), theme:$('themeSwitch'),
+  };
+  let unit = 'm';
+  let baseMin = 0.45, baseMax = 25;   // stored in metres
+  let active = null;
+
+  /* ── theme ── */
+  function applyTheme(dark){
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    els.theme.setAttribute('aria-checked', String(dark));
+    els.theme.setAttribute('aria-label', dark ? 'Light theme' : 'Dark theme');
+  }
+  applyTheme(true);
+  els.theme.addEventListener('click', () => applyTheme(els.theme.getAttribute('aria-checked') !== 'true'));
+
+  /* ── units ── */
+  const fmtInput = v => parseFloat(v.toFixed(3)).toString();
+  function captureBase(){
+    const a = parseFloat(els.min.value), b = parseFloat(els.max.value);
+    if (Number.isFinite(a)) baseMin = unit === 'm' ? a : a / FT;
+    if (Number.isFinite(b)) baseMax = unit === 'm' ? b : b / FT;
+  }
+  function setUnit(u){
+    if (u === unit){ return; }
+    captureBase();
+    unit = u;
+    els.uM.setAttribute('aria-pressed', u === 'm');
+    els.uFt.setAttribute('aria-pressed', u === 'ft');
+    document.querySelectorAll('[data-unit]').forEach(n => n.textContent = u);
+    els.min.value = fmtInput(unit === 'm' ? baseMin : baseMin * FT);
+    els.max.value = fmtInput(unit === 'm' ? baseMax : baseMax * FT);
+    refresh();
+  }
+  els.uM.addEventListener('click', () => setUnit('m'));
+  els.uFt.addEventListener('click', () => setUnit('ft'));
+
+  /* ── model (mirrors the workbook formula) ── */
+  function pctOf(A, S){
+    if (A > S) return null;
+    if (S === 1 && A === 1) return 'MIN / INF';
+    if (A === 1) return 'MIN';
+    if (A === S) return 'INF';
+    if (S === 2) return null;
+    if (S === 3) return CURVE[17];
+    const pos = 1 + (A - 2) * 17 / (S - 3);
+    const f = Math.floor(pos), c = Math.ceil(pos);
+    return CURVE[f-1] + (CURVE[c-1] - CURVE[f-1]) * (pos - f);
+  }
+  const fmtFull  = v => v.toFixed(3);                       // distances: thousandths
+  const fmtShort = v => v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
+  const fmtPct   = p => (p * 100).toFixed(2) + '%';         // percent: hundredths
+
+  function compute(){
+    const minV = parseFloat(els.min.value), maxV = parseFloat(els.max.value);
+    const S = parseInt(els.steps.value, 10);
+    const ok = Number.isFinite(minV) && Number.isFinite(maxV) && maxV > minV;
+    const out = [];
+    for (let A = 1; A <= S; A++){
+      const p = pctOf(A, S);
+      let kind, dist = null, pctVal = null;
+      if (p === 'MIN')            { kind = 'MIN';       dist = ok ? minV : null; pctVal = 0; }
+      else if (p === 'INF')       { kind = 'INF'; }
+      else if (p === 'MIN / INF') { kind = 'MIN / INF'; dist = ok ? minV : null; pctVal = 0; }
+      else                        { kind = 'num'; pctVal = p; dist = ok ? minV + p*(maxV-minV) : null; }
+      out.push({ step:A, kind, pctVal, dist });
+    }
+    return { rows:out, S, ok };
+  }
+
+  /* ── table ── */
+  function renderTable(model){
+    els.rows.innerHTML = '';
+    model.rows.forEach(r => {
+      const tr = document.createElement('tr');
+      tr.dataset.step = r.step;
+      let mark, pct, dist;
+      if (r.kind === 'num'){
+        mark = '<span style="color:var(--steel)">&#183;</span>';
+        pct  = fmtPct(r.pctVal);
+        dist = r.dist == null ? '&#8212;' : fmtFull(r.dist) + ' <span style="color:var(--accent)">'+unit+'</span>';
+      } else if (r.kind === 'INF'){
+        mark = '<span class="tag">INF</span>';
+        pct  = '<span style="color:var(--steel)">&#8212;</span>';
+        dist = '<span class="tag">&#8734;</span>';
+      } else { // MIN or MIN / INF
+        const lbl = r.kind === 'MIN' ? 'MIN' : 'MIN / &#8734;';
+        mark = '<span class="tag min">'+lbl+'</span>';
+        pct  = '<span style="color:var(--ink-dim)">0.00%</span>';
+        dist = r.dist == null ? '&#8212;' : fmtFull(r.dist) + ' <span style="color:var(--accent)">'+unit+'</span>';
+      }
+      tr.innerHTML =
+        '<td class="idx">'+String(r.step).padStart(2,'0')+'</td>'+
+        '<td>'+mark+'</td>'+
+        '<td class="num-col" style="color:var(--ink-dim)">'+pct+'</td>'+
+        '<td class="num-col dist">'+dist+'</td>';
+      tr.addEventListener('mouseenter', () => setActive(r.step));
+      tr.addEventListener('mouseleave', () => setActive(null));
+      els.rows.appendChild(tr);
+    });
+  }
+
+  /* ── dial (logarithmic distance scale) ── */
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const cx=220, cy=190, R=130, rTick=106, rLabel=152;
+  const A_START=232, A_SWEEP=284, FIN_SPAN=0.92; // finite marks fill 92%, ∞ sits beyond
+  const pol = (deg,r) => { const a = deg*Math.PI/180; return [cx + r*Math.cos(a), cy - r*Math.sin(a)]; };
+
+  function renderDial(model){
+    const svg = els.dial; svg.innerHTML = '';
+    const S = model.S;
+
+    // base arc
+    const [sx,sy] = pol(A_START, R), [ex,ey] = pol(A_START - A_SWEEP, R);
+    const arc = document.createElementNS(SVGNS,'path');
+    arc.setAttribute('d', 'M '+sx+' '+sy+' A '+R+' '+R+' 0 '+(A_SWEEP>180?1:0)+' 1 '+ex+' '+ey);
+    arc.setAttribute('class','arc-base'); svg.appendChild(arc);
+
+    // log scaling bounds over finite distances
+    const fin = model.rows.filter(r => r.dist != null).map(r => r.dist);
+    const minD = fin.length ? Math.min(...fin) : 1;
+    const maxD = fin.length ? Math.max(...fin) : 1;
+    const logOK = maxD > minD && minD > 0;
+    const lnLo = Math.log(minD), lnHi = Math.log(maxD);
+
+    function tOf(r, i){
+      if (S === 1) return 0.5;
+      if (r.kind === 'INF') return 1;
+      if (!logOK) return i/(S-1);
+      const lt = (Math.log(r.dist) - lnLo) / (lnHi - lnLo); // 0..1 on log axis
+      return lt * FIN_SPAN;
+    }
+
+    model.rows.forEach((r,i) => {
+      const deg = A_START - tOf(r,i)*A_SWEEP;
+      const [x1,y1] = pol(deg, R), [x2,y2] = pol(deg, rTick);
+      const edge = (r.kind !== 'num');
+
+      const line = document.createElementNS(SVGNS,'line');
+      line.setAttribute('x1',x1); line.setAttribute('y1',y1);
+      line.setAttribute('x2',x2); line.setAttribute('y2',y2);
+      line.setAttribute('class','tick'+((r.kind==='MIN'||r.kind==='MIN / INF')?' is-min':'')+(r.kind==='INF'?' is-inf':''));
+      line.dataset.step = r.step; svg.appendChild(line);
+
+      const showLabel = edge || S<=10 || i%2===0 || i===S-1;
+      if (showLabel){
+        const [lx,ly] = pol(deg, rLabel);
+        const txt = document.createElementNS(SVGNS,'text');
+        txt.setAttribute('x',lx); txt.setAttribute('y',ly+3);
+        txt.setAttribute('text-anchor', lx < cx-8 ? 'end' : (lx > cx+8 ? 'start' : 'middle'));
+        let label;
+        if (r.kind === 'num')      label = r.dist==null ? '\u00B7' : fmtShort(r.dist);
+        else if (r.kind === 'INF') label = '\u221E';
+        else if (r.kind === 'MIN') label = 'MIN';
+        else                       label = 'MIN/\u221E';
+        txt.textContent = label;
+        txt.setAttribute('class','tick-label'+(edge?' is-edge':''));
+        txt.dataset.step = r.step; svg.appendChild(txt);
+      }
+    });
+
+    const def = model.rows.find(r=>r.kind==='num') || model.rows[0];
+    setActive(active && active<=S ? active : (def?def.step:1), model);
+  }
+
+  let MODEL = null;
+  function setActive(step, model){
+    const m = model || MODEL; active = step;
+    els.dial.querySelectorAll('.tick,.tick-label').forEach(n => n.classList.toggle('active', +n.dataset.step === step));
+    els.rows.querySelectorAll('tr').forEach(tr => tr.classList.toggle('active', +tr.dataset.step === step));
+    const r = m && m.rows.find(x => x.step === step);
+    if (!r) return;
+    els.rStep.textContent = 'step ' + String(r.step).padStart(2,'0');
+    if (r.kind === 'num'){
+      els.rDist.innerHTML = (r.dist==null?'\u2014':fmtFull(r.dist)) + ' <span class="r-unit">'+unit+'</span>';
+      els.rPct.textContent = r.dist==null ? 'set a valid range' : 'travel \u00B7 ' + fmtPct(r.pctVal);
+    } else if (r.kind === 'INF'){
+      els.rDist.innerHTML = '\u221E';
+      els.rPct.textContent = 'infinity (INF)';
+    } else {
+      els.rDist.innerHTML = (r.dist==null?'MIN':fmtFull(r.dist) + ' <span class="r-unit">'+unit+'</span>');
+      els.rPct.textContent = r.kind==='MIN' ? 'near focus limit (MIN)' : 'single mark \u00B7 MIN / \u221E';
+    }
+  }
+
+  function refresh(){
+    els.stepsVal.textContent = els.steps.value;
+    MODEL = compute();
+    renderTable(MODEL);
+    renderDial(MODEL);
+  }
+
+  ['input','change'].forEach(ev => {
+    els.min.addEventListener(ev, () => { captureBase(); refresh(); });
+    els.max.addEventListener(ev, () => { captureBase(); refresh(); });
+    els.steps.addEventListener(ev, refresh);
+  });
+
+  refresh();
+})();
+</script>
+</body>
+</html>
